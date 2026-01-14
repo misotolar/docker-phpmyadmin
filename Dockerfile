@@ -1,19 +1,27 @@
-FROM php:8.2-fpm-alpine3.21
+FROM php:8.3-fpm-alpine3.23
 
-LABEL maintainer="michal@sotolar.com"
+LABEL org.opencontainers.image.url="https://github.com/misotolar/docker-phpmyadmin"
+LABEL org.opencontainers.image.description="phpMyAdmin Alpine Linux FPM image"
+LABEL org.opencontainers.image.authors="Michal Sotolar <michal@sotolar.com>"
 
-ENV PHPMYADMIN_VERSION=5.2.2
-ARG SHA256=f881819a3b11e653b0212afaf0cc105db85c767715cb3f5852670f7fc36c9669
+ENV PHPMYADMIN_VERSION=5.2.3
+ARG SHA256=57881348297c4412f86c410547cf76b4d8a236574dd2c6b7d6a2beebe7fc44e3
 ADD https://files.phpmyadmin.net/phpMyAdmin/$PHPMYADMIN_VERSION/phpMyAdmin-$PHPMYADMIN_VERSION-all-languages.tar.xz /usr/src/phpMyAdmin.tar.xz
 
-ENV PHP_MAX_EXECUTION_TIME 600
-ENV PHP_MEMORY_LIMIT 512M
-ENV PHP_UPLOAD_LIMIT 2048K
+ENV PHP_UPLOADPROGRESS_VERSION=2.0.2
+
+ENV TZ=UTC
+ENV PHP_FPM_POOL=www
+ENV PHP_FPM_LISTEN=0.0.0.0:9000
+ENV PHP_MAX_EXECUTION_TIME=600
+ENV PHP_MEMORY_LIMIT=512M
+ENV PHP_UPLOAD_LIMIT=2048K
 
 WORKDIR /usr/local/phpmyadmin
 
 RUN set -ex; \
     apk add --no-cache \
+        gettext-envsubst \
         rsync \
     ; \
     apk add --no-cache --virtual .build-deps \
@@ -35,6 +43,11 @@ RUN set -ex; \
         zip \
         bcmath \
     ; \
+    pecl channel-update pecl.php.net; \
+    pecl install \
+        uploadprogress-${PHP_UPLOADPROGRESS_VERSION} \
+    ; \
+    docker-php-ext-enable --ini-name pecl-uploadprogress.ini uploadprogress; \
     runDeps="$( \
         scanelf --needed --nobanner --format '%n#p' --recursive /usr/local/lib/php/extensions \
             | tr ',' '\n' \
@@ -59,11 +72,12 @@ RUN set -ex; \
     { \
         echo 'expose_php=off'; \
         echo 'allow_url_fopen=off'; \
-        echo 'max_execution_time=${PHP_MAX_EXECUTION_TIME}'; \
+        echo 'date.timezone=${TZ}'; \
         echo 'max_input_vars=10000'; \
         echo 'memory_limit=${PHP_MEMORY_LIMIT}'; \
         echo 'post_max_size=${PHP_UPLOAD_LIMIT}'; \
         echo 'upload_max_filesize=${PHP_UPLOAD_LIMIT}'; \
+        echo 'max_execution_time=${PHP_MAX_EXECUTION_TIME}'; \
     } > $PHP_INI_DIR/conf.d/phpmyadmin-misc.ini; \
     echo "$SHA256 */usr/src/phpMyAdmin.tar.xz" | sha256sum -c -; \
     rm -rf \
@@ -73,6 +87,7 @@ RUN set -ex; \
         /var/tmp/* \
         /tmp/*
 
+COPY resources/php-fpm.conf /usr/local/etc/php-fpm.conf.docker
 COPY resources/config.inc.php /etc/phpmyadmin/config.inc.php
 COPY resources/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY resources/exclude.txt /usr/src/phpMyAdmin.exclude
